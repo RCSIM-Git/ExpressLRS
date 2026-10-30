@@ -29,6 +29,40 @@ static float ahrs_yaw   = 0.0f; // radians (-PI to +PI)
 static bool ahrs_initialized = false;
 static uint32_t ahrs_last_us = 0;
 
+// Standard CRSF 0x13: timestamp, gyro XYZ, acceleration XYZ, temperature.
+typedef struct {
+    uint32_t sample_time_us;
+    int16_t gyro_x, gyro_y, gyro_z;
+    int16_t accel_x, accel_y, accel_z;
+    int16_t temperature_centi;
+} PACKED crsf_sensor_accgyro_local_t;
+static_assert(sizeof(crsf_sensor_accgyro_local_t) == 18, "CRSF AccGyro payload must be 18 bytes");
+
+static int16_t Imu_Scale(float value)
+{
+    return (int16_t)roundf(fmaxf(-32767.0f, fminf(32767.0f, value)));
+}
+
+static void Imu_PublishRaw(uint32_t timestamp, int16_t ax, int16_t ay, int16_t az,
+                           int16_t gx, int16_t gy, int16_t gz, int16_t temperature)
+{
+    CRSF_MK_FRAME_T(crsf_sensor_accgyro_local_t) frame = {0};
+    frame.p.sample_time_us = htobe32(timestamp);
+    // MPU configured at +/-250 dps (131 LSB/dps), +/-2g (16384 LSB/g).
+    // CRSF positive roll is LEFT; existing AHRS uses positive roll RIGHT.
+    constexpr float gyroScale = 32767.0f / (2000.0f * 131.0f);
+    constexpr float accelScale = 32767.0f / (16.0f * 16384.0f);
+    frame.p.gyro_x = htobe16(Imu_Scale(-gx * gyroScale));
+    frame.p.gyro_y = htobe16(Imu_Scale(gy * gyroScale));
+    frame.p.gyro_z = htobe16(Imu_Scale(gz * gyroScale));
+    frame.p.accel_x = htobe16(Imu_Scale(ax * accelScale));
+    frame.p.accel_y = htobe16(Imu_Scale(ay * accelScale));
+    frame.p.accel_z = htobe16(Imu_Scale(az * accelScale));
+    frame.p.temperature_centi = htobe16(temperature);
+    crsfRouter.SetHeaderAndCrc(&frame.h, (crsf_frame_type_e)0x13, CRSF_FRAME_SIZE(sizeof(frame.p)));
+    crsfRouter.deliverMessageTo(CRSF_ADDRESS_RADIO_TRANSMITTER, &frame.h);
+}
+
 static void Imu_PublishSample()
 {
     if (!imu_initialized)
@@ -99,7 +133,8 @@ static void Imu_PublishSample()
     {
         int16_t r_ax = 0, r_ay = 0, r_az = 16384;
         int16_t r_gx = 0, r_gy = 0, r_gz = 0;
-        if (!imu.readAccelGyro(r_ax, r_ay, r_az, r_gx, r_gy, r_gz))
+        int16_t temperature = 0;
+        if (!imu.readAccelGyro(r_ax, r_ay, r_az, r_gx, r_gy, r_gz, &temperature))
         {
             imu_initialized = false; // lost connection, retry next loop
             ahrs_initialized = false;
@@ -107,6 +142,7 @@ static void Imu_PublishSample()
         }
 
         uint32_t now_us = micros();
+        Imu_PublishRaw(now_us, r_ax, r_ay, r_az, r_gx, r_gy, r_gz, temperature);
         float dt = 0.01f; // default 10ms (100Hz)
         if (ahrs_last_us != 0)
         {

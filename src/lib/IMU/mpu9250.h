@@ -28,7 +28,7 @@ public:
     // Burst-reads accel+temp+gyro in one transaction (14 bytes from 0x3B).
     // Returns false on I2C failure; values are left unchanged in that case.
     bool readAccelGyro(int16_t &ax, int16_t &ay, int16_t &az,
-                        int16_t &gx, int16_t &gy, int16_t &gz);
+                        int16_t &gx, int16_t &gy, int16_t &gz, int16_t *temperatureCenti = nullptr);
 
     // Reads magnetometer if enabled and a fresh sample is available (ST1 DRDY bit).
     // Returns false if no new sample was ready or mag is disabled -- this is
@@ -46,6 +46,7 @@ private:
     bool readRegsAt(uint8_t i2cAddr, uint8_t reg, uint8_t *buf, uint8_t len) const;
 
     uint8_t m_address = MPU9250_ADDR;
+    uint8_t m_whoami = 0;
     bool m_initialized = false;
     bool m_magEnabled = false;
 };

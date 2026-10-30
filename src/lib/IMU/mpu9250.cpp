@@ -133,6 +133,7 @@ bool MPU9250::readRegs(uint8_t reg, uint8_t *buf, uint8_t len) const { return re
 bool MPU9250::initialize(uint8_t address, bool enableMag)
 {
     m_address = address;
+    m_whoami = readReg(0x75);
     Wire.setClock(100000);
 
     // Wake the chip from default sleep mode (PWR_MGMT_1 bit 6 = 1 on power-up)
@@ -187,7 +188,7 @@ bool MPU9250::initialize(uint8_t address, bool enableMag)
 }
 
 bool MPU9250::readAccelGyro(int16_t &ax, int16_t &ay, int16_t &az,
-                             int16_t &gx, int16_t &gy, int16_t &gz)
+                             int16_t &gx, int16_t &gy, int16_t &gz, int16_t *temperatureCenti)
 {
     uint8_t raw[14];
     if (!readRegs(REG_ACCEL_XOUT_H, raw, sizeof(raw)))
@@ -196,7 +197,11 @@ bool MPU9250::readAccelGyro(int16_t &ax, int16_t &ay, int16_t &az,
     ax = (int16_t)((raw[0] << 8) | raw[1]);
     ay = (int16_t)((raw[2] << 8) | raw[3]);
     az = (int16_t)((raw[4] << 8) | raw[5]);
-    // raw[6..7] is temperature, unused here.
+    if (temperatureCenti) {
+        const int16_t rawTemp = (int16_t)((raw[6] << 8) | raw[7]);
+        const float tempC = m_whoami == 0x68 ? rawTemp / 340.0f + 36.53f : rawTemp / 333.87f + 21.0f;
+        *temperatureCenti = (int16_t)(tempC * 100.0f);
+    }
     gx = (int16_t)((raw[8] << 8) | raw[9]);
     gy = (int16_t)((raw[10] << 8) | raw[11]);
     gz = (int16_t)((raw[12] << 8) | raw[13]);
